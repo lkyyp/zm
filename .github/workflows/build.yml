@@ -88,7 +88,7 @@ jobs:
             dpkg-deb -x "$deb" "$temp"
             prefix="$temp/var/jb/Library"
             for binary in "$prefix/MobileSubstrate/DynamicLibraries/AxsTwinDial.dylib" "$prefix/PreferenceBundles/AxsTwinDialPrefs.bundle/AxsTwinDialPrefs"; do
-              xcrun lipo -verify_arch arm64 arm64e "$binary"
+              xcrun lipo "$binary" -verify_arch arm64 arm64e
               codesign -d "$binary"
             done
             for art in next previous pause; do
