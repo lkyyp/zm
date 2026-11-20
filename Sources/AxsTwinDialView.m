@@ -117,8 +117,8 @@ static UILabel *axs_twindial_label(void) {
 - (UIButton *)axs_twindial_button:(UIImage *)image name:(NSString *)name command:(AxsTwinDialCommand)command {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setImage:image forState:UIControlStateNormal];
+    // The PNG is already normalized to 28 pt; keep the full button as the hit area.
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
-    button.imageEdgeInsets = UIEdgeInsetsMake(3,3,3,3);
     button.tag = command;
     button.accessibilityLabel = name;
     [button addTarget:self action:@selector(axs_twindial_pressed:) forControlEvents:UIControlEventTouchUpInside];
