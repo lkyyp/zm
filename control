@@ -1,0 +1,11 @@
+Package: com.axs.twindial
+Name: 桌面双环
+Version: 5.2.0~test1
+Architecture: iphoneos-arm
+Description: 桌面音乐与天气双环
+Maintainer: Axs
+Author: Axs
+Section: Axs-Tweaks
+Depends: firmware (>= 16.0), firmware (<< 17.0), mobilesubstrate, preferenceloader
+Icon: https://axs66.github.io/pro/icon/twindial.png
+Sileodepiction: https://axs66.github.io/pro/sileodepiction/twindial/js.json

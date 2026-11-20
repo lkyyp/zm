@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "TwinDial",
+  "id": "twindial",
+  "display_name": "桌面双环",
+  "class_prefix": "AxsTwinDial",
+  "symbol_prefix": "axs_twindial",
+  "package": "com.axs.twindial",
+  "bundle": "com.apple.springboard",
+  "sdk_version": "16.5",
+  "minimum_ios": "16.0",
+  "preferences": true,
+  "slider": true,
+  "github_actions": true
+}
