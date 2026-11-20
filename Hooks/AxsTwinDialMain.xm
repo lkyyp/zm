@@ -41,6 +41,11 @@ static UIView *axs_twindial_desktopHost(void) {
     id list = axs_twindial_object(root, @selector(currentIconListView));
     id lists = axs_twindial_object(root, @selector(iconListViews));
     if (![lists isKindOfClass:NSArray.class] || ![lists containsObject:list ?: NSNull.null] || ![list isKindOfClass:UIView.class]) return nil;
+    id firstOnly = [[AxsTwinDialConfig axs_twindial_shared] axs_twindial_valueForKey:@"firstPageOnly" defaultValue:@YES];
+    if (![firstOnly isKindOfClass:NSNumber.class] || [firstOnly boolValue]) {
+        id first = axs_twindial_object(root, @selector(firstIconListView)) ?: [lists firstObject];
+        if (list != first) return nil;
+    }
     id location = axs_twindial_object(list, @selector(iconLocation));
     if (![location isKindOfClass:NSString.class] || ![location hasPrefix:@"SBIconLocationRoot"]) return nil;
     UIView *host = list;

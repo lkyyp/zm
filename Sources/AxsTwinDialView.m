@@ -5,6 +5,7 @@
 #import "AxsTwinDialArc.h"
 #import "AxsTwinDialPaths.h"
 #import <QuartzCore/QuartzCore.h>
+#import <CoreLocation/CoreLocation.h>
 #import <math.h>
 
 static id axs_twindial_setting(NSString *key, id fallback) {
@@ -15,8 +16,9 @@ static CGFloat axs_twindial_number(NSString *key, CGFloat fallback, CGFloat low,
     double value = [n isKindOfClass:NSNumber.class] ? [n doubleValue] : fallback;
     return isfinite(value) ? fmax(low, fmin(high, value)) : fallback;
 }
-static UIColor *axs_twindial_color(void) {
-    id v = axs_twindial_setting(@"textColor", @"F0FAFF");
+static UIColor *axs_twindial_color(NSString *key) {
+    id base = axs_twindial_setting(@"textColor", @"F0FAFF");
+    id v = key ? axs_twindial_setting(key, base) : base;
     unsigned int rgb = 0;
     if (![v isKindOfClass:NSString.class] || [v length] != 6) return UIColor.whiteColor;
     NSScanner *scan = [NSScanner scannerWithString:v];
@@ -32,7 +34,7 @@ static UILabel *axs_twindial_label(void) {
     return label;
 }
 
-@interface AxsTwinDialView () <UIGestureRecognizerDelegate>
+@interface AxsTwinDialView () <UIGestureRecognizerDelegate, CLLocationManagerDelegate>
 @property(nonatomic,strong) UIView *player, *weather;
 @property(nonatomic,strong) UIImageView *playerArt, *weatherArt;
 @property(nonatomic,strong) UIImage *playImage, *pauseImage;
@@ -42,7 +44,12 @@ static UILabel *axs_twindial_label(void) {
 @property(nonatomic,strong) UIButton *previous, *toggle, *next;
 @property(nonatomic,strong) NSData *imageData;
 @property(nonatomic,strong) NSTimer *timer;
-@property(nonatomic,copy) NSString *city;
+@property(nonatomic,copy) NSString *city, *locationStatus;
+@property(nonatomic,strong) CLLocationManager *locationManager;
+@property(nonatomic,strong) CLGeocoder *geocoder;
+@property(nonatomic,strong) CLLocation *lastPlace;
+@property(nonatomic) NSUInteger locationGeneration;
+@property(nonatomic) BOOL autoLocation;
 @property(nonatomic,strong) NSDictionary *weatherData;
 @property(nonatomic) NSUInteger weatherGeneration, mediaGeneration, feedbackGeneration;
 @property(nonatomic) BOOL running, mediaPending, weatherPending, volumeTracking, feedbackActive;
@@ -134,13 +141,18 @@ static UILabel *axs_twindial_label(void) {
     CGFloat period = axs_twindial_number(@"period", 18, 0, 60);
     BOOL newPeriod = self.period != period;
     self.period = period;
-    UIColor *ink = axs_twindial_color();
-    for (AxsTwinDialArc *arc in @[self.lyricTop,self.lyricBottom,self.weatherTop,self.weatherBottom]) arc.ink = ink;
-    for (UILabel *l in @[self.footer,self.weatherMessage,self.weatherAlert]) l.textColor = ink;
+    UIColor *ink = axs_twindial_color(nil);
+    self.lyricTop.ink = axs_twindial_color(@"inkLyrics");
+    self.lyricBottom.ink = axs_twindial_color(@"inkTrack");
+    self.weatherTop.ink = axs_twindial_color(@"inkForecast");
+    self.weatherBottom.ink = axs_twindial_color(@"inkPlace");
+    self.weatherMessage.textColor = axs_twindial_color(@"inkMessage");
+    self.weatherAlert.textColor = axs_twindial_color(@"inkAlert");
+    self.footer.textColor = ink;
     for (UIView *v in @[self.previous,self.toggle,self.next]) v.tintColor = ink;
     BOOL demo = [axs_twindial_setting(@"demoLyrics", @NO) isEqual:@YES];
     self.lyricTop.text = demo ? @"示例 · 把夜色交给海风" : @"暂无歌词";
-    self.lyricBottom.text = demo ? @"让浪花带走旧梦" : @"";
+    if (!self.lyricBottom.text.length) self.lyricBottom.text = @"暂无曲目";
     self.toggle.backgroundColor = [ink colorWithAlphaComponent:.16];
     id image = axs_twindial_setting(@"artwork", nil);
     NSData *valid = [image isKindOfClass:NSData.class] && [image length] <= 350000 ? image : nil;
@@ -151,13 +163,18 @@ static UILabel *axs_twindial_label(void) {
     }
     if (!self.playerArt.image) self.playerArt.image = [self axs_twindial_defaultArt:NO];
     if (!self.weatherArt.image) self.weatherArt.image = [self axs_twindial_defaultArt:YES];
-    id rawCity = axs_twindial_setting(@"city", @"");
-    NSString *city = [rawCity isKindOfClass:NSString.class] ? [rawCity stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"";
-    if (![city isEqualToString:self.city]) {
-        self.city = [city substringToIndex:MIN((NSUInteger)160, city.length)];
-        self.weatherGeneration++;
-        self.weatherPending = NO; self.nextWeather = 0; self.weatherData = nil;
-        [self axs_twindial_updateWeather:nil];
+    id autoValue = axs_twindial_setting(@"autoLocation", @YES);
+    BOOL automatic = [autoValue isKindOfClass:NSNumber.class] ? [autoValue boolValue] : YES;
+    if (automatic != self.autoLocation) {
+        self.autoLocation = automatic;
+        [self axs_twindial_stopLocation];
+        self.locationStatus = nil;
+        [self axs_twindial_setWeatherCity:@""];
+        if (automatic && self.running) [self axs_twindial_startLocation];
+    }
+    if (!automatic) {
+        id rawCity = axs_twindial_setting(@"city", @"");
+        [self axs_twindial_setWeatherCity:[rawCity isKindOfClass:NSString.class] ? rawCity : @""];
     }
     if (newPeriod && self.running) [self axs_twindial_spin:YES];
     if (self.running) [self axs_twindial_checkWeather];
@@ -193,7 +210,7 @@ static UILabel *axs_twindial_label(void) {
     left *= fit; right *= fit;
     CGFloat x = 10 + (w-left-right-gap-20)*self.horizontal, lx = x+left/2, rx = x+left+gap+right/2;
     CGFloat margin = fmax(left,right)/2 + 8;
-    CGFloat cy = fmax(margin, fmin(h-margin,h*self.offset));
+    CGFloat cy = margin + (h-2*margin)*((self.offset-.15)/.70);
     [self axs_twindial_disc:self.player art:self.playerArt size:left center:CGPointMake(lx,cy)];
     [self axs_twindial_disc:self.weather art:self.weatherArt size:right center:CGPointMake(rx,cy)];
     CGFloat a = lx+left/2-9, b = rx-right/2+9, d = b-a;
@@ -260,6 +277,10 @@ static UILabel *axs_twindial_label(void) {
 - (void)axs_twindial_setRunning:(BOOL)running {
     if (_running == running) return;
     _running = running;
+    if (self.autoLocation) {
+        if (running) [self axs_twindial_startLocation];
+        else [self axs_twindial_stopLocation];
+    }
     [self axs_twindial_spin:running];
     if (running) {
         __weak typeof(self) weakSelf = self;
@@ -290,6 +311,12 @@ static UILabel *axs_twindial_label(void) {
         AxsTwinDialView *view = weakSelf;
         if (!view.running || token != view.mediaGeneration) return;
         view.mediaPending = NO;
+        id title = info[@"kMRMediaRemoteNowPlayingInfoTitle"];
+        id artist = info[@"kMRMediaRemoteNowPlayingInfoArtist"];
+        NSString *name = [title isKindOfClass:NSString.class] ? title : @"";
+        NSString *by = [artist isKindOfClass:NSString.class] ? artist : @"";
+        view.lyricBottom.text = name.length ? (by.length ? [NSString stringWithFormat:@"%@ · %@",name,by] : name) : (by.length ? by : @"暂无曲目");
+        view.lyricBottom.accessibilityLabel = view.lyricBottom.text;
         [view.toggle setImage:playing ? view.pauseImage : view.playImage forState:UIControlStateNormal];
         view.toggle.accessibilityLabel = playing ? @"暂停" : @"播放";
     });
@@ -349,8 +376,89 @@ static UILabel *axs_twindial_label(void) {
     });
 }
 
+- (void)axs_twindial_setWeatherCity:(NSString *)city {
+    city = [city stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (city.length > 159) city = @"";
+    if ([city isEqualToString:self.city]) return;
+    self.city = city;
+    self.weatherGeneration++; self.weatherPending = NO;
+    self.nextWeather = 0; self.weatherData = nil;
+    [self axs_twindial_updateWeather:nil];
+}
+
+- (void)axs_twindial_stopLocation {
+    self.locationGeneration++;
+    [self.geocoder cancelGeocode]; self.geocoder = nil;
+    self.lastPlace = nil;
+    [self.locationManager stopUpdatingLocation];
+    self.locationManager.delegate = nil; self.locationManager = nil;
+}
+
+- (void)axs_twindial_startLocation {
+    if (self.locationManager || !self.running || !self.autoLocation) return;
+    self.locationStatus = @"等待定位";
+    self.locationManager = [CLLocationManager new];
+    self.locationManager.desiredAccuracy = kCLLocationAccuracyKilometer;
+    self.locationManager.distanceFilter = 1500;
+    self.locationManager.delegate = self;
+    [self locationManagerDidChangeAuthorization:self.locationManager];
+}
+
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
+    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
+    CLAuthorizationStatus state = manager.authorizationStatus;
+    if (state == kCLAuthorizationStatusAuthorizedAlways || state == kCLAuthorizationStatusAuthorizedWhenInUse) {
+        [manager startUpdatingLocation];
+    } else {
+        [manager stopUpdatingLocation];
+        self.locationGeneration++; [self.geocoder cancelGeocode]; self.geocoder = nil; self.lastPlace = nil;
+        self.locationStatus = state == kCLAuthorizationStatusNotDetermined ? @"桌面定位未授权" : @"定位不可用";
+        [self axs_twindial_setWeatherCity:@""];
+        [self axs_twindial_updateWeather:nil];
+    }
+}
+
+- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations {
+    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
+    if (manager.authorizationStatus != kCLAuthorizationStatusAuthorizedAlways && manager.authorizationStatus != kCLAuthorizationStatusAuthorizedWhenInUse) return;
+    CLLocation *point = locations.lastObject;
+    if (!point || !CLLocationCoordinate2DIsValid(point.coordinate) || point.horizontalAccuracy < 0 || point.horizontalAccuracy > 30000 || fabs(point.timestamp.timeIntervalSinceNow)>600) return;
+    if (self.lastPlace && [self.lastPlace distanceFromLocation:point] < 1500) return;
+    self.lastPlace = point;
+    NSUInteger generation = ++self.locationGeneration;
+    [self.geocoder cancelGeocode]; self.geocoder = [CLGeocoder new];
+    NSString *coordinates = [NSString stringWithFormat:@"%.2f,%.2f",point.coordinate.latitude,point.coordinate.longitude];
+    NSString *suffix = [@"@" stringByAppendingString:coordinates];
+    if (![self.city hasSuffix:suffix]) {
+        self.locationStatus = @"正在更新位置";
+        [self axs_twindial_setWeatherCity:@""];
+    }
+    __weak typeof(self) weakSelf = self;
+    void (^apply)(NSString *) = ^(NSString *label) {
+        AxsTwinDialView *view = weakSelf;
+        if (!view.running || !view.autoLocation || generation != view.locationGeneration) return;
+        [view axs_twindial_setWeatherCity:[NSString stringWithFormat:@"%@@%@",label.length ? label : @"当前位置",coordinates]];
+        [view axs_twindial_checkWeather];
+    };
+    [self.geocoder reverseGeocodeLocation:point completionHandler:^(NSArray<CLPlacemark *> *marks, NSError *error) {
+        if (error) return;
+        CLPlacemark *mark = marks.firstObject;
+        dispatch_async(dispatch_get_main_queue(), ^{ apply(mark.locality ?: mark.subAdministrativeArea ?: mark.administrativeArea); });
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,6*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        AxsTwinDialView *view = weakSelf;
+        if (![view.city hasSuffix:[@"@" stringByAppendingString:coordinates]]) apply(nil);
+    });
+}
+
+- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
+    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
+    if (error.code == kCLErrorDenied) [self locationManagerDidChangeAuthorization:manager];
+    else if (!self.city.length) { self.locationStatus = @"暂未取得位置"; [self axs_twindial_updateWeather:nil]; }
+}
+
 - (void)axs_twindial_checkWeather {
-    if (!self.running || !self.city.length || self.weatherPending) return;
+    if (!self.running || !self.city.length || self.weatherPending || (self.autoLocation && !self.lastPlace)) return;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (now < self.nextWeather) return;
     self.weatherPending = YES;
@@ -370,8 +478,8 @@ static UILabel *axs_twindial_label(void) {
 - (void)axs_twindial_updateWeather:(NSString *)error {
     NSDictionary *data = self.weatherData;
     NSString *condition = data[@"condition"], *range = data[@"range"];
-    NSString *location = data[@"location"] ?: self.city, *rain = data[@"rain"];
-    self.weatherTop.text = condition.length ? (range.length ? [NSString stringWithFormat:@"%@ · %@",condition,range] : condition) : (self.city.length ? (error ?: @"正在获取") : @"请设置城市");
+    NSString *location = data[@"location"] ?: (self.autoLocation ? @"" : self.city), *rain = data[@"rain"];
+    self.weatherTop.text = condition.length ? (range.length ? [NSString stringWithFormat:@"%@ · %@",condition,range] : condition) : (self.city.length ? (error ?: @"正在获取") : (self.autoLocation ? (self.locationStatus ?: @"等待定位") : @"请设置城市"));
     self.weatherBottom.text = rain.length ? [NSString stringWithFormat:@"%@ · %@",location ?: @"",rain] : (location ?: @"");
     self.weatherAlert.text = data[@"alert"] ?: (data && error ? @"数据暂未刷新" : @"");
 }

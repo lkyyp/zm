@@ -14,7 +14,9 @@ for w,h,s,t,x,y in product((230,320,390,430,768),(180,390,540,850),axes('playerS
     fit = min(1,(w-56-gap)/(left+right),(h-16)/max(left,right))
     left,right = left*fit,right*fit
     margin = max(left,right)/2+8
-    cy = max(margin,min(h-margin,h*y))
+    cy = margin+(h-2*margin)*((y-.15)/.70)
+    if h-2*margin > 1e-6 and y<.8499:
+        assert margin+(h-2*margin)*((y+.0001-.15)/.70)>cy
     X = 10+(w-left-right-gap-20)*x
     assert 9.99 <= X and X+left+gap+right <= w-9.99
     assert 7.99 <= cy-max(left,right)/2 and cy+max(left,right)/2 <= h-7.99

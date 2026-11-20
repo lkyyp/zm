@@ -21,7 +21,8 @@
                      set:nil get:nil detail:nil cell:PSGroupCell edit:nil]];
         [self axs_twindial_addButton:@"从相册选一张背景" action:@selector(axs_twindial_pick:) to:items];
         [self axs_twindial_addButton:@"恢复默认背景" action:@selector(axs_twindial_resetArt:) to:items];
-        [self axs_twindial_addButton:@"设置文字颜色" action:@selector(axs_twindial_pickInk:) to:items];
+        [self axs_twindial_addButton:@"分行设置文字颜色" action:@selector(axs_twindial_pickInk:) to:items];
+        [self axs_twindial_addButton:@"精确输入整体位置" action:@selector(axs_twindial_exactPosition:) to:items];
         [self axs_twindial_addButton:@"设置天气城市" action:@selector(axs_twindial_pickCity:) to:items];
         [items addObject:[PSSpecifier preferenceSpecifierNamed:@"关于我们" target:self
                      set:nil get:nil detail:nil cell:PSGroupCell edit:nil]];
@@ -110,18 +111,40 @@
     else [self axs_twindial_note:@"已恢复默认背景" message:nil];
 }
 
-- (void)axs_twindial_pickInk:(id)sender { [self axs_twindial_editField:YES]; }
-- (void)axs_twindial_pickCity:(id)sender { [self axs_twindial_editField:NO]; }
-
-- (void)axs_twindial_editField:(BOOL)ink {
-    NSString *key = ink ? @"textColor" : @"city";
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:ink ? @"文字颜色" : @"天气城市"
-        message:ink ? @"输入 6 位色号，例如 F0FAFF；留空恢复默认。" : @"输入城市名或纬度,经度。城市名或手填坐标会发送给 Open-Meteo 查询；留空关闭天气。"
-        preferredStyle:UIAlertControllerStyleAlert];
+- (void)axs_twindial_pickInk:(id)sender {
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"文字颜色" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    NSArray *rows = @[@[@"默认颜色",@"textColor"], @[@"左上 · 歌词",@"inkLyrics"], @[@"左下 · 曲名和歌手",@"inkTrack"], @[@"右上 · 天气和温度",@"inkForecast"], @[@"右中 · 横排文字",@"inkMessage"], @[@"右下 · 城市和降水",@"inkPlace"], @[@"右中下 · 补充信息",@"inkAlert"]];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray *row in rows) [menu addAction:[UIAlertAction actionWithTitle:row[0] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 350*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ [weakSelf axs_twindial_edit:row[1] title:row[0] mode:0]; });
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
+}
+- (void)axs_twindial_pickCity:(id)sender { [self axs_twindial_edit:@"city" title:@"天气城市" mode:1]; }
+- (void)axs_twindial_exactPosition:(id)sender {
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"精确输入整体位置" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray *row in @[@[@"横向",@"horizontal"],@[@"纵向",@"vertical"]]) [menu addAction:[UIAlertAction actionWithTitle:row[0] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 350*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ [weakSelf axs_twindial_edit:row[1] title:row[0] mode:2]; });
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
+}
+- (void)axs_twindial_edit:(NSString *)key title:(NSString *)title mode:(NSUInteger)mode {
+    BOOL vertical = [key isEqualToString:@"vertical"];
+    NSString *message = mode == 0 ? @"输入 6 位色号，例如 F0FAFF；留空沿用默认颜色。" : mode == 1 ? @"输入城市名或纬度,经度，会发送给 Open-Meteo 查询；留空关闭天气。" : (vertical ? @"输入 15–85，支持两位小数。" : @"输入 0–100，支持两位小数。");
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         id current = axs_twindial_readPreferences()[key];
-        field.text = [current isKindOfClass:NSString.class] ? current : @"";
-        field.placeholder = ink ? @"F0FAFF" : @"上海 / Shanghai / 31.23,121.47";
+        if (mode == 2) {
+            double value = [current isKindOfClass:NSNumber.class] ? [current doubleValue]*100 : (vertical ? 57 : 50);
+            field.text = [NSString stringWithFormat:@"%.2f",value];
+            field.keyboardType = UIKeyboardTypeDecimalPad;
+        } else {
+            field.text = [current isKindOfClass:NSString.class] ? current : @"";
+            field.placeholder = mode == 0 ? @"F0FAFF" : @"上海 / Shanghai / 31.23,121.47";
+        }
         field.autocorrectionType = UITextAutocorrectionTypeNo;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -129,14 +152,21 @@
     __weak UIAlertController *weakAlert = alert;
     [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *value = [weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
-        if (ink && [value hasPrefix:@"#"]) value = [value substringFromIndex:1];
+        if (mode == 0 && [value hasPrefix:@"#"]) value = [value substringFromIndex:1];
+        id saved = value.length ? value : nil;
         NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"] invertedSet];
         NSString *notice = nil;
-        if (ink && value.length && (value.length != 6 || [value rangeOfCharacterFromSet:nonHex].location != NSNotFound)) notice = @"请输入有效的 6 位色号。";
-        else if (value.length > 96) notice = @"城市名或坐标太长。";
-        else {
+        if (mode == 0 && value.length && (value.length != 6 || [value rangeOfCharacterFromSet:nonHex].location != NSNotFound)) notice = @"请输入有效的 6 位色号。";
+        else if (mode == 1 && value.length > 96) notice = @"城市名或坐标太长。";
+        else if (mode == 2) {
+            NSString *number = [value stringByReplacingOccurrencesOfString:@"," withString:@"."];
+            double n = number.doubleValue;
+            if (number.length > 6 || [number rangeOfString:@"^[0-9]{1,3}([.][0-9]{1,2})?$" options:NSRegularExpressionSearch].location == NSNotFound || n < (vertical ? 15 : 0) || n > (vertical ? 85 : 100)) notice = @"位置超出范围或小数超过两位。";
+            else saved = @(n/100.0);
+        }
+        if (!notice) {
             NSError *error = nil;
-            if (!axs_twindial_writePreference(key, value.length ? value : nil, &error)) notice = error.localizedDescription ?: @"配置不可写。";
+            if (!axs_twindial_writePreference(key, saved, &error)) notice = error.localizedDescription ?: @"配置不可写。";
         }
         if (notice) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 450*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ [weakSelf axs_twindial_note:@"设置未保存" message:notice]; });
     }]];

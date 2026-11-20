@@ -47,7 +47,7 @@
     CGFloat width = CGRectGetWidth(self.contentView.bounds);
     CGFloat height = CGRectGetHeight(self.contentView.bounds);
     CGFloat available = MAX(0.0, width - 32.0);
-    CGFloat valueWidth = MIN(52.0, available * 0.25);
+    CGFloat valueWidth = MIN(66.0, available * 0.25);
     CGFloat titleWidth = MIN(110.0, available * 0.32);
     CGFloat sliderX = 16.0 + titleWidth + 8.0;
     CGFloat valueX = MAX(sliderX, width - 16.0 - valueWidth);
@@ -75,7 +75,8 @@
 }
 
 - (void)axs_twindial_updateLabel {
-    NSString *value = [NSString stringWithFormat:@"%.1f", self.slider.value];
+    BOOL position = [[self.specifier propertyForKey:@"positionPrecision"] boolValue];
+    NSString *value = position ? [NSString stringWithFormat:@"%.2f%%", self.slider.value*100.0] : [NSString stringWithFormat:@"%.1f", self.slider.value];
     self.valueLabel.text = value;
     self.slider.accessibilityValue = value;
 }

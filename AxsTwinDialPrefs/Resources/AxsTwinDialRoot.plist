@@ -26,6 +26,18 @@
 		</dict>
 		<dict>
 			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>仅在桌面首页显示</string>
+			<key>key</key>
+			<string>firstPageOnly</string>
+			<key>defaults</key>
+			<string>com.axs.twindial</string>
+			<key>default</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>布局和动画</string>
@@ -85,6 +97,8 @@
 			<real>0.0</real>
 			<key>max</key>
 			<real>1.0</real>
+			<key>positionPrecision</key>
+			<true/>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -103,6 +117,8 @@
 			<real>0.15</real>
 			<key>max</key>
 			<real>0.85</real>
+			<key>positionPrecision</key>
+			<true/>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -128,19 +144,39 @@
 			<key>label</key>
 			<string>测试选项</string>
 			<key>footerText</key>
-			<string>示例歌词只用于检查弧形排版，不是当前歌曲歌词。此版未接入同步歌词与实时预警。</string>
+			<string>示例歌词仅用于检查上弧，下弧显示系统曲名与歌手。同步歌词与实时预警未接入。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>显示两行示例歌词</string>
+			<string>上弧显示示例歌词</string>
 			<key>key</key>
 			<string>demoLyrics</string>
 			<key>defaults</key>
 			<string>com.axs.twindial</string>
 			<key>default</key>
 			<false/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>天气定位</string>
+			<key>footerText</key>
+			<string>自动定位仅在桌面显示且系统允许时使用；约 1 公里精度的坐标会发送给 Open-Meteo，系统地理编码用于取地名。不用时可关闭。系统不允许桌面定位时可关闭自动定位并手动选城市。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>天气跟随当前位置</string>
+			<key>key</key>
+			<string>autoLocation</string>
+			<key>defaults</key>
+			<string>com.axs.twindial</string>
+			<key>default</key>
+			<true/>
 		</dict>
 	</array>
 </dict>
