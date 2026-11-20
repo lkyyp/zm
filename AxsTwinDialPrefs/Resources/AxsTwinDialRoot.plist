@@ -142,17 +142,17 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>测试选项</string>
+			<string>自动歌词</string>
 			<key>footerText</key>
-			<string>真实逐行歌词需先导入带时间戳的 LRC；下弧显示曲名和歌手。示例与真实歌词无关。</string>
+			<string>启用后会向 LRCLIB 发送当前曲名、歌手、专辑和时长以匹配时间轴，不需导入文件。无可靠匹配时不串词。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>没有匹配歌词时显示示例</string>
+			<string>自动匹配在线歌词</string>
 			<key>key</key>
-			<string>demoLyrics</string>
+			<string>onlineLyrics</string>
 			<key>defaults</key>
 			<string>com.axs.twindial</string>
 			<key>default</key>
@@ -162,9 +162,9 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>天气定位</string>
+			<string>系统天气</string>
 			<key>footerText</key>
-			<string>自动定位默认开启。到「设置 › 隐私与安全性 › 定位服务」打开总开关。若桌面宿主仍未获授权，此插件不能代替系统发放权限；授权天气 App 不等于授权桌面。</string>
+			<string>自动模式只读系统天气已有的当地预报。不单独定位，不发送自动取得的位置。</string>
 		</dict>
 		<dict>
 			<key>cell</key>

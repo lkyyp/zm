@@ -5,7 +5,7 @@ import plistlib
 root = Path(__file__).resolve().parent
 prefs = plistlib.loads((root/'AxsTwinDialPrefs/Resources/AxsTwinDialRoot.plist').read_bytes())
 keys = {x['key']:x for x in prefs['items'] if 'key' in x}
-assert keys['enabled']['default'] is False and keys['demoLyrics']['default'] is False
+assert keys['enabled']['default'] is False and keys['onlineLyrics']['default'] is False
 axes = lambda k: [keys[k]['min'], keys[k]['default'], keys[k]['max']]
 count = 0
 for w,h,s,t,x,y in product((230,320,390,430,768),(180,390,540,850),axes('playerScale'),axes('weatherScale'),axes('topX'),axes('topY')):

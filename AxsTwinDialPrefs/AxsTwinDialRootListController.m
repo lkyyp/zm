@@ -8,7 +8,7 @@
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-@interface AxsTwinDialRootListController () <AxsTwinDialSliderCellHandler, PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
+@interface AxsTwinDialRootListController () <AxsTwinDialSliderCellHandler, PHPickerViewControllerDelegate>
 @end
 
 @implementation AxsTwinDialRootListController
@@ -23,8 +23,6 @@
         [self axs_twindial_addButton:@"恢复默认背景" action:@selector(axs_twindial_resetArt:) to:items];
         [self axs_twindial_addButton:@"分行设置文字颜色" action:@selector(axs_twindial_pickInk:) to:items];
         [self axs_twindial_addButton:@"精确输入整体位置" action:@selector(axs_twindial_exactPosition:) to:items];
-        [self axs_twindial_addButton:@"导入 LRC 歌词" action:@selector(axs_twindial_selectLyrics:) to:items];
-        [self axs_twindial_addButton:@"LRC 歌词命名说明" action:@selector(axs_twindial_importLyrics:) to:items];
         [self axs_twindial_addButton:@"自动定位帮助" action:@selector(axs_twindial_locationHelp:) to:items];
         [self axs_twindial_addButton:@"设置天气城市" action:@selector(axs_twindial_pickCity:) to:items];
         [items addObject:[PSSpecifier preferenceSpecifierNamed:@"关于我们" target:self
@@ -125,41 +123,7 @@
     [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)axs_twindial_locationHelp:(id)sender {
-    [self axs_twindial_note:@"开启自动定位" message:@"1. 设置 → 隐私与安全性 → 定位服务，开启总开关。\n2. 回桌面双环设置，打开‘天气跟随当前位置’。\n3. 回首页等待定位。若仍提示‘桌面定位未获授权’，当前系统未给桌面宿主权限；天气 App 的授权不会转给插件。此时可关闭跟随并手填城市。"];
-}
-
-- (void)axs_twindial_importLyrics:(id)sender {
-    [self axs_twindial_note:@"LRC 命名" message:@"准备带时间戳的 UTF‑8 歌词文件，文件名为‘歌手 - 曲名.lrc’，与播放器显示完全一致。关闭提示后点‘导入 LRC 歌词’。"];
-}
-
-- (void)axs_twindial_selectLyrics:(id)sender {
-    UTType *lrc = [UTType typeWithFilenameExtension:@"lrc"] ?: UTTypeData;
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[lrc, UTTypePlainText, UTTypeData] asCopy:YES];
-    picker.delegate = self;
-    [self presentViewController:picker animated:YES completion:nil];
-}
-
-- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *url = urls.firstObject;
-    if (!url) return;
-    BOOL scoped = [url startAccessingSecurityScopedResource];
-    NSNumber *size = nil;
-    [url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
-    NSString *name = url.URLByDeletingPathExtension.lastPathComponent;
-    NSMutableData *bytes = nil;
-    if ([url.pathExtension.lowercaseString isEqualToString:@"lrc"] && [name containsString:@" - "] && name.length <= 200 && size.unsignedLongLongValue > 0 && size.unsignedLongLongValue <= 65536) {
-        NSFileHandle *handle = [NSFileHandle fileHandleForReadingFromURL:url error:nil];
-        bytes = [[handle readDataUpToLength:65537 error:nil] mutableCopy];
-        [handle closeFile];
-    }
-    if (scoped) [url stopAccessingSecurityScopedResource];
-    NSString *text = bytes.length <= 65536 ? [[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding] : nil;
-    NSError *error = nil;
-    BOOL valid = text.length && [text rangeOfString:@"\\[[0-9]{1,3}:[0-5][0-9]" options:NSRegularExpressionSearch].location != NSNotFound;
-    BOOL saved = valid && axs_twindial_writePreference(@"localLRC",@{@"name":name,@"text":text},&error);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
-        if (self.viewIfLoaded.window) [self axs_twindial_note:saved ? @"歌词已保存" : @"歌词未保存" message:saved ? @"回首页播放文件名对应的歌曲。再次导入会替换当前歌词文件。" : (error.localizedDescription ?: @"请选用‘歌手 - 曲名.lrc’命名的 UTF‑8 时间轴歌词，最大 64 KB。")];
-    });
+    [self axs_twindial_note:@"开启自动定位" message:@"双环只读系统「天气」已有的当地预报，不单独定位、不改权限。自动模式暂未读到数据时会明确提示。可关闭跟随并手动选城市。"];
 }
 
 - (void)axs_twindial_pickCity:(id)sender { [self axs_twindial_edit:@"city" title:@"天气城市" mode:1]; }

@@ -5,7 +5,7 @@
 #import "AxsTwinDialArc.h"
 #import "AxsTwinDialPaths.h"
 #import <QuartzCore/QuartzCore.h>
-#import <CoreLocation/CoreLocation.h>
+#import "AxsTwinDialSources.h"
 #import <math.h>
 
 static id axs_twindial_setting(NSString *key, id fallback) {
@@ -34,7 +34,7 @@ static UILabel *axs_twindial_label(void) {
     return label;
 }
 
-@interface AxsTwinDialView () <UIGestureRecognizerDelegate, CLLocationManagerDelegate>
+@interface AxsTwinDialView () <UIGestureRecognizerDelegate>
 @property(nonatomic,strong) UIView *player, *weather;
 @property(nonatomic,strong) UIImageView *playerArt, *weatherArt;
 @property(nonatomic,strong) UIImage *playImage, *pauseImage;
@@ -45,10 +45,6 @@ static UILabel *axs_twindial_label(void) {
 @property(nonatomic,strong) NSData *imageData;
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic,copy) NSString *city, *locationStatus;
-@property(nonatomic,strong) CLLocationManager *locationManager;
-@property(nonatomic,strong) CLGeocoder *geocoder;
-@property(nonatomic,strong) CLLocation *lastPlace;
-@property(nonatomic) NSUInteger locationGeneration;
 @property(nonatomic) BOOL autoLocation;
 @property(nonatomic,strong) NSDictionary *weatherData;
 @property(nonatomic) NSUInteger weatherGeneration, mediaGeneration, feedbackGeneration;
@@ -56,9 +52,14 @@ static UILabel *axs_twindial_label(void) {
 @property(nonatomic) NSTimeInterval nextWeather, mediaStarted, lastVolumeWrite;
 @property(nonatomic) float volumeBase;
 @property(nonatomic) CGFloat period, leftScale, rightScale, topX, topY;
-@property(nonatomic,copy) NSString *lrcName, *lrcText;
+@property(nonatomic,copy) NSArray *track;
+@property(nonatomic,copy) NSDictionary *mediaInfo;
 @property(nonatomic,copy) NSArray<NSArray *> *lrcRows;
-@property(nonatomic) BOOL demoLyrics;
+@property(nonatomic,strong) NSURLSessionDataTask *lyricsTask;
+@property(nonatomic,copy) NSString *lyricsStatus;
+@property(nonatomic) NSUInteger lyricsGeneration;
+@property(nonatomic) NSTimeInterval retryLyrics, nextLyricsLookup, nextMedia;
+@property(nonatomic) BOOL onlineLyrics;
 @end
 
 @implementation AxsTwinDialView
@@ -154,16 +155,12 @@ static UILabel *axs_twindial_label(void) {
     self.weatherAlert.textColor = axs_twindial_color(@"inkAlert");
     self.footer.textColor = ink;
     for (UIView *v in @[self.previous,self.toggle,self.next]) v.tintColor = ink;
-    self.demoLyrics = [axs_twindial_setting(@"demoLyrics", @NO) isEqual:@YES];
-    id local = axs_twindial_setting(@"localLRC", nil);
-    NSDictionary *lrc = [local isKindOfClass:NSDictionary.class] ? local : nil;
-    NSString *text = [lrc[@"text"] isKindOfClass:NSString.class] ? lrc[@"text"] : @"";
-    NSString *name = [lrc[@"name"] isKindOfClass:NSString.class] ? lrc[@"name"] : @"";
-    if (![self.lrcText isEqualToString:text] || ![self.lrcName isEqualToString:name]) {
-        self.lrcName = name; self.lrcText = text;
-        self.lrcRows = [self axs_twindial_parseLyrics:text];
-        self.lyricTop.text = self.demoLyrics ? @"示例 · 把夜色交给海风" : @"未导入匹配歌词";
+    BOOL online = [axs_twindial_setting(@"onlineLyrics", @NO) isEqual:@YES];
+    if (online != self.onlineLyrics) {
+        self.onlineLyrics = online;
+        [self axs_twindial_resetLyrics];
     }
+    if (!online) self.lyricTop.text = @"在线歌词未开启";
     if (self.running) [self axs_twindial_refreshMedia];
     if (!self.lyricBottom.text.length) self.lyricBottom.text = @"暂无曲目";
     self.toggle.backgroundColor = [ink colorWithAlphaComponent:.16];
@@ -180,10 +177,8 @@ static UILabel *axs_twindial_label(void) {
     BOOL automatic = [autoValue isKindOfClass:NSNumber.class] ? [autoValue boolValue] : YES;
     if (automatic != self.autoLocation) {
         self.autoLocation = automatic;
-        [self axs_twindial_stopLocation];
         self.locationStatus = nil;
         [self axs_twindial_setWeatherCity:@""];
-        if (automatic && self.running) [self axs_twindial_startLocation];
     }
     if (!automatic) {
         id rawCity = axs_twindial_setting(@"city", @"");
@@ -291,20 +286,18 @@ static UILabel *axs_twindial_label(void) {
 - (void)axs_twindial_setRunning:(BOOL)running {
     if (_running == running) return;
     _running = running;
-    if (self.autoLocation) {
-        if (running) [self axs_twindial_startLocation];
-        else [self axs_twindial_stopLocation];
-    }
     [self axs_twindial_spin:running];
     if (running) {
         __weak typeof(self) weakSelf = self;
-        self.timer = [NSTimer timerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) {
-            [weakSelf axs_twindial_refreshMedia]; [weakSelf axs_twindial_checkWeather];
+        self.timer = [NSTimer timerWithTimeInterval:.5 repeats:YES block:^(NSTimer *timer) {
+            [weakSelf axs_twindial_refreshMedia]; [weakSelf axs_twindial_drawLyrics]; [weakSelf axs_twindial_checkWeather];
         }];
         [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
         [self axs_twindial_refreshMedia]; [self axs_twindial_checkWeather];
     } else {
         [self.timer invalidate]; self.timer = nil;
+        [self axs_twindial_resetLyrics]; self.nextMedia = 0;
+        if (self.autoLocation) self.nextWeather = 0;
         self.mediaGeneration++; self.mediaPending = NO;
         self.weatherGeneration++; self.weatherPending = NO;
         self.volumeTracking = NO; self.feedbackGeneration++; self.feedbackActive = NO;
@@ -349,18 +342,76 @@ static UILabel *axs_twindial_label(void) {
     return [rows copy];
 }
 
+- (void)axs_twindial_resetLyrics {
+    self.lyricsGeneration++; [self.lyricsTask cancel]; self.lyricsTask = nil;
+    self.track = nil; self.mediaInfo = nil; self.lrcRows = nil; self.retryLyrics = 0;
+    self.lyricsStatus = @""; self.lyricTop.text = @"";
+}
+
 - (void)axs_twindial_updateLyrics:(NSDictionary *)info title:(NSString *)title artist:(NSString *)artist {
-    NSString *fallback = self.demoLyrics ? @"示例 · 把夜色交给海风" : @"未导入匹配歌词";
-    NSString *name = [[NSString stringWithFormat:@"%@ - %@",artist,title] precomposedStringWithCanonicalMapping];
-    if (!artist.length || !title.length || ![name isEqualToString:self.lrcName.precomposedStringWithCanonicalMapping] || !self.lrcRows.count) { self.lyricTop.text = fallback; return; }
+    if (!self.onlineLyrics) return;
+    id album = info[@"kMRMediaRemoteNowPlayingInfoAlbum"], duration = info[@"kMRMediaRemoteNowPlayingInfoDuration"];
+    if (![album isKindOfClass:NSString.class]) album = @"";
+    double seconds = [duration isKindOfClass:NSNumber.class] ? [duration doubleValue] : 0;
+    BOOL valid = isfinite(seconds) && seconds >= 1 && seconds <= 14400;
+    NSArray *names = @[title, artist, album];
+    NSMutableArray *identity = [NSMutableArray array];
+    for (NSString *value in names) {
+        NSString *field = [[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] precomposedStringWithCanonicalMapping];
+        if (!field.length || field.length > 200) valid = NO;
+        [identity addObject:field];
+    }
+    if (!valid) {
+        if (self.track) [self axs_twindial_resetLyrics];
+        self.lyricTop.text = title.length ? @"曲目信息不足" : @"";
+        return;
+    }
+    [identity addObject:@(lround(seconds))];
+    BOOL changed = ![self.track isEqual:identity];
+    if (changed) {
+        [self axs_twindial_resetLyrics];
+        self.track = [identity copy]; self.lyricsStatus = @"正在匹配歌词";
+        self.retryLyrics = NSProcessInfo.processInfo.systemUptime;
+    }
+    // Retain only the playback clock, not album artwork or other media payloads.
+    NSMutableDictionary *clock = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"kMRMediaRemoteNowPlayingInfoElapsedTime", @"kMRMediaRemoteNowPlayingInfoTimestamp", @"kMRMediaRemoteNowPlayingInfoPlaybackRate"]) {
+        if (info[key]) clock[key] = info[key];
+    }
+    self.mediaInfo = clock;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.retryLyrics > 0 && now >= self.retryLyrics && now >= self.nextLyricsLookup && !self.lyricsTask) {
+        NSUInteger token = ++self.lyricsGeneration;
+        self.nextLyricsLookup = now + 2;
+        self.retryLyrics = 0;
+        __weak typeof(self) weakSelf = self;
+        self.lyricsTask = axs_twindial_lookupLyrics(self.track, ^(NSString *text, NSString *status, BOOL retry) {
+            AxsTwinDialView *view = weakSelf;
+            if (!view.running || token != view.lyricsGeneration) return;
+            view.lyricsTask = nil;
+            view.lrcRows = [view axs_twindial_parseLyrics:text];
+            view.lyricsStatus = status;
+            if (retry) view.retryLyrics = NSProcessInfo.processInfo.systemUptime + 60;
+            [view axs_twindial_drawLyrics];
+        });
+        if (!self.lyricsTask) self.lyricsStatus = @"无法查询歌词";
+    }
+    [self axs_twindial_drawLyrics];
+}
+
+- (void)axs_twindial_drawLyrics {
+    if (!self.running || !self.onlineLyrics || !self.track) return;
+    if (!self.lrcRows.count) { self.lyricTop.text = self.lyricsStatus; return; }
+    NSDictionary *info = self.mediaInfo;
     id progress = info[@"kMRMediaRemoteNowPlayingInfoElapsedTime"];
     if (![progress isKindOfClass:NSNumber.class] || !isfinite([progress doubleValue]) || [progress doubleValue]<0) { self.lyricTop.text = @"播放器未提供进度"; return; }
     double elapsed = [progress doubleValue];
     id timestamp = info[@"kMRMediaRemoteNowPlayingInfoTimestamp"], rate = info[@"kMRMediaRemoteNowPlayingInfoPlaybackRate"];
     if ([timestamp isKindOfClass:NSDate.class] && [rate isKindOfClass:NSNumber.class]) {
         double extra = -[timestamp timeIntervalSinceNow], speed = [rate doubleValue];
-        if (isfinite(extra) && extra > 0 && extra < 86400 && isfinite(speed) && speed > 0 && speed <= 4) elapsed += extra*speed;
+        if (isfinite(extra) && extra > 0 && extra < [self.track[3] doubleValue] + 30 && isfinite(speed) && speed > 0 && speed <= 4) elapsed += extra*speed;
     }
+    elapsed = fmin(elapsed, [self.track[3] doubleValue]);
     NSUInteger lo=0, hi=self.lrcRows.count;
     while (lo<hi) { NSUInteger m=lo+(hi-lo)/2; if ([self.lrcRows[m][0] doubleValue]<=elapsed) lo=m+1; else hi=m; }
     NSString *line = lo ? self.lrcRows[lo-1][1] : @"";
@@ -370,7 +421,8 @@ static UILabel *axs_twindial_label(void) {
 - (void)axs_twindial_refreshMedia {
     if (!self.running) return;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    if (self.mediaPending && now-self.mediaStarted < 8) return;
+    if (now < self.nextMedia || (self.mediaPending && now-self.mediaStarted < 8)) return;
+    self.nextMedia = now + 1;
     self.mediaPending = YES; self.mediaStarted = now;
     NSUInteger token = ++self.mediaGeneration;
     __weak typeof(self) weakSelf = self;
@@ -454,81 +506,18 @@ static UILabel *axs_twindial_label(void) {
     [self axs_twindial_updateWeather:nil];
 }
 
-- (void)axs_twindial_stopLocation {
-    self.locationGeneration++;
-    [self.geocoder cancelGeocode]; self.geocoder = nil;
-    self.lastPlace = nil;
-    [self.locationManager stopUpdatingLocation];
-    self.locationManager.delegate = nil; self.locationManager = nil;
-}
-
-- (void)axs_twindial_startLocation {
-    if (self.locationManager || !self.running || !self.autoLocation) return;
-    self.locationStatus = @"等待定位";
-    self.locationManager = [CLLocationManager new];
-    self.locationManager.desiredAccuracy = kCLLocationAccuracyKilometer;
-    self.locationManager.distanceFilter = 1500;
-    self.locationManager.delegate = self;
-    [self locationManagerDidChangeAuthorization:self.locationManager];
-}
-
-- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
-    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
-    CLAuthorizationStatus state = manager.authorizationStatus;
-    if (state == kCLAuthorizationStatusAuthorizedAlways || state == kCLAuthorizationStatusAuthorizedWhenInUse) {
-        [manager startUpdatingLocation];
-    } else {
-        [manager stopUpdatingLocation];
-        self.locationGeneration++; [self.geocoder cancelGeocode]; self.geocoder = nil; self.lastPlace = nil;
-        self.locationStatus = state == kCLAuthorizationStatusNotDetermined ? @"桌面定位未获授权" : @"定位不可用";
-        [self axs_twindial_setWeatherCity:@""];
-        [self axs_twindial_updateWeather:nil];
-    }
-}
-
-- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations {
-    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
-    if (manager.authorizationStatus != kCLAuthorizationStatusAuthorizedAlways && manager.authorizationStatus != kCLAuthorizationStatusAuthorizedWhenInUse) return;
-    CLLocation *point = locations.lastObject;
-    if (!point || !CLLocationCoordinate2DIsValid(point.coordinate) || point.horizontalAccuracy < 0 || point.horizontalAccuracy > 30000 || fabs(point.timestamp.timeIntervalSinceNow)>600) return;
-    if (self.lastPlace && [self.lastPlace distanceFromLocation:point] < 1500) return;
-    self.lastPlace = point;
-    NSUInteger generation = ++self.locationGeneration;
-    [self.geocoder cancelGeocode]; self.geocoder = [CLGeocoder new];
-    NSString *coordinates = [NSString stringWithFormat:@"%.2f,%.2f",point.coordinate.latitude,point.coordinate.longitude];
-    NSString *suffix = [@"@" stringByAppendingString:coordinates];
-    if (![self.city hasSuffix:suffix]) {
-        self.locationStatus = @"正在更新位置";
-        [self axs_twindial_setWeatherCity:@""];
-    }
-    __weak typeof(self) weakSelf = self;
-    void (^apply)(NSString *) = ^(NSString *label) {
-        AxsTwinDialView *view = weakSelf;
-        if (!view.running || !view.autoLocation || generation != view.locationGeneration) return;
-        [view axs_twindial_setWeatherCity:[NSString stringWithFormat:@"%@@%@",label.length ? label : @"当前位置",coordinates]];
-        [view axs_twindial_checkWeather];
-    };
-    [self.geocoder reverseGeocodeLocation:point completionHandler:^(NSArray<CLPlacemark *> *marks, NSError *error) {
-        if (error) return;
-        CLPlacemark *mark = marks.firstObject;
-        dispatch_async(dispatch_get_main_queue(), ^{ apply(mark.locality ?: mark.subAdministrativeArea ?: mark.administrativeArea); });
-    }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,6*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-        AxsTwinDialView *view = weakSelf;
-        if (![view.city hasSuffix:[@"@" stringByAppendingString:coordinates]]) apply(nil);
-    });
-}
-
-- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
-    if (manager != self.locationManager || !self.running || !self.autoLocation) return;
-    if (error.code == kCLErrorDenied) [self locationManagerDidChangeAuthorization:manager];
-    else if (!self.city.length) { self.locationStatus = @"暂未取得位置"; [self axs_twindial_updateWeather:nil]; }
-}
-
 - (void)axs_twindial_checkWeather {
-    if (!self.running || !self.city.length || self.weatherPending || (self.autoLocation && !self.lastPlace)) return;
+    if (!self.running || self.weatherPending) return;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (now < self.nextWeather) return;
+    if (self.autoLocation) {
+        self.weatherData = axs_twindial_systemWeather();
+        self.locationStatus = @"系统当地天气未就绪";
+        self.nextWeather = now + 60;
+        [self axs_twindial_updateWeather:nil];
+        return;
+    }
+    if (!self.city.length) return;
     self.weatherPending = YES;
     self.nextWeather = now + 90;
     NSUInteger token = ++self.weatherGeneration;
@@ -547,7 +536,7 @@ static UILabel *axs_twindial_label(void) {
     NSDictionary *data = self.weatherData;
     NSString *condition = data[@"condition"], *range = data[@"range"];
     NSString *location = data[@"location"] ?: (self.autoLocation ? @"" : self.city), *rain = data[@"rain"];
-    self.weatherTop.text = condition.length ? (range.length ? [NSString stringWithFormat:@"%@ · %@",condition,range] : condition) : (self.city.length ? (error ?: @"正在获取") : (self.autoLocation ? (self.locationStatus ?: @"等待定位") : @"请设置城市"));
+    self.weatherTop.text = condition.length ? (range.length ? [NSString stringWithFormat:@"%@ · %@",condition,range] : condition) : ((data ? @"天气状态暂不可用" : self.city.length ? (error ?: @"正在获取") : (self.autoLocation ? (self.locationStatus ?: @"等待定位") : @"请设置城市")));
     self.weatherBottom.text = rain.length ? [NSString stringWithFormat:@"%@ · %@",location ?: @"",rain] : (location ?: @"");
     self.weatherAlert.text = data[@"alert"] ?: (data && error ? @"数据暂未刷新" : @"");
 }
