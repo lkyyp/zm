@@ -86,18 +86,18 @@
 			<key>cellClass</key>
 			<string>AxsTwinDialSliderCell</string>
 			<key>label</key>
-			<string>整体横向</string>
+			<string>顶部横向微调</string>
 			<key>key</key>
-			<string>horizontal</string>
+			<string>topX</string>
 			<key>defaults</key>
 			<string>com.axs.twindial</string>
 			<key>default</key>
-			<real>0.5</real>
-			<key>min</key>
 			<real>0.0</real>
+			<key>min</key>
+			<real>-12.0</real>
 			<key>max</key>
-			<real>1.0</real>
-			<key>positionPrecision</key>
+			<real>12.0</real>
+			<key>pointPrecision</key>
 			<true/>
 		</dict>
 		<dict>
@@ -106,18 +106,18 @@
 			<key>cellClass</key>
 			<string>AxsTwinDialSliderCell</string>
 			<key>label</key>
-			<string>整体纵向</string>
+			<string>顶部纵向微调</string>
 			<key>key</key>
-			<string>vertical</string>
+			<string>topY</string>
 			<key>defaults</key>
 			<string>com.axs.twindial</string>
 			<key>default</key>
-			<real>0.57</real>
+			<real>0.0</real>
 			<key>min</key>
-			<real>0.15</real>
+			<real>-12.0</real>
 			<key>max</key>
-			<real>0.85</real>
-			<key>positionPrecision</key>
+			<real>12.0</real>
+			<key>pointPrecision</key>
 			<true/>
 		</dict>
 		<dict>
@@ -144,13 +144,13 @@
 			<key>label</key>
 			<string>测试选项</string>
 			<key>footerText</key>
-			<string>示例歌词仅用于检查上弧，下弧显示系统曲名与歌手。同步歌词与实时预警未接入。</string>
+			<string>真实逐行歌词需先导入带时间戳的 LRC；下弧显示曲名和歌手。示例与真实歌词无关。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>上弧显示示例歌词</string>
+			<string>没有匹配歌词时显示示例</string>
 			<key>key</key>
 			<string>demoLyrics</string>
 			<key>defaults</key>
@@ -164,7 +164,7 @@
 			<key>label</key>
 			<string>天气定位</string>
 			<key>footerText</key>
-			<string>自动定位仅在桌面显示且系统允许时使用；约 1 公里精度的坐标会发送给 Open-Meteo，系统地理编码用于取地名。不用时可关闭。系统不允许桌面定位时可关闭自动定位并手动选城市。</string>
+			<string>自动定位默认开启。到「设置 › 隐私与安全性 › 定位服务」打开总开关。若桌面宿主仍未获授权，此插件不能代替系统发放权限；授权天气 App 不等于授权桌面。</string>
 		</dict>
 		<dict>
 			<key>cell</key>

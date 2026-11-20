@@ -22,7 +22,7 @@
     CGFloat d = MIN(self.bounds.size.width,self.bounds.size.height), r = d*.386;
     if (r < 1) return;
     CGPoint center = CGPointMake(CGRectGetMidX(self.bounds),CGRectGetMidY(self.bounds));
-    CGFloat limit = r*2.35;
+    CGFloat limit = r*(self.axs_twindial_separateBands ? (self.bottom ? 1.55 : 1.90) : 2.35);
     NSDictionary *attrs = @{NSFontAttributeName:[UIFont systemFontOfSize:fmax(8,d*.088) weight:self.bottom?UIFontWeightMedium:UIFontWeightSemibold], NSForegroundColorAttributeName:self.ink ?: UIColor.whiteColor};
     NSMutableArray<NSString *> *glyphs = [NSMutableArray array];
     CGFloat ellipsis = [@"…" sizeWithAttributes:attrs].width;
@@ -34,6 +34,13 @@
         } else { [glyphs addObject:part]; width += step; }
     }];
     CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGContextSaveGState(ctx);
+    if (self.axs_twindial_separateBands) {
+        // Keep both lyrics and metadata away from the center controls and each other.
+        CGRect band = self.bottom ? CGRectMake(CGRectGetMinX(self.bounds), center.y+d*.23, d, d*.27)
+                                  : CGRectMake(CGRectGetMinX(self.bounds), CGRectGetMinY(self.bounds), d, d*.36);
+        CGContextClipToRect(ctx, band);
+    }
     CGFloat x = -width/2;
     for (NSString *glyph in glyphs) {
         CGSize size = [glyph sizeWithAttributes:attrs];
@@ -46,5 +53,6 @@
         CGContextRestoreGState(ctx);
         x += size.width;
     }
+    CGContextRestoreGState(ctx);
 }
 @end

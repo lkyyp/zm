@@ -55,7 +55,10 @@ static UILabel *axs_twindial_label(void) {
 @property(nonatomic) BOOL running, mediaPending, weatherPending, volumeTracking, feedbackActive;
 @property(nonatomic) NSTimeInterval nextWeather, mediaStarted, lastVolumeWrite;
 @property(nonatomic) float volumeBase;
-@property(nonatomic) CGFloat period, leftScale, rightScale, offset, horizontal;
+@property(nonatomic) CGFloat period, leftScale, rightScale, topX, topY;
+@property(nonatomic,copy) NSString *lrcName, *lrcText;
+@property(nonatomic,copy) NSArray<NSArray *> *lrcRows;
+@property(nonatomic) BOOL demoLyrics;
 @end
 
 @implementation AxsTwinDialView
@@ -91,6 +94,7 @@ static UILabel *axs_twindial_label(void) {
         [disc addSubview:shade];
     }
     _lyricTop = [AxsTwinDialArc new]; _lyricBottom = [AxsTwinDialArc new]; _lyricBottom.bottom = YES;
+    _lyricTop.axs_twindial_separateBands = _lyricBottom.axs_twindial_separateBands = YES;
     [_player addSubview:_lyricTop]; [_player addSubview:_lyricBottom];
     _footer = axs_twindial_label(); _footer.userInteractionEnabled = NO;
     [_player addSubview:_footer];
@@ -136,8 +140,8 @@ static UILabel *axs_twindial_label(void) {
 - (void)axs_twindial_reloadStyle {
     self.leftScale = axs_twindial_number(@"playerScale", 1, .72, 1.34);
     self.rightScale = axs_twindial_number(@"weatherScale", 1, .72, 1.34);
-    self.offset = axs_twindial_number(@"vertical", 0.57, .15, .85);
-    self.horizontal = axs_twindial_number(@"horizontal", .5, 0, 1);
+    self.topX = axs_twindial_number(@"topX", 0, -12, 12);
+    self.topY = axs_twindial_number(@"topY", 0, -12, 12);
     CGFloat period = axs_twindial_number(@"period", 18, 0, 60);
     BOOL newPeriod = self.period != period;
     self.period = period;
@@ -150,8 +154,17 @@ static UILabel *axs_twindial_label(void) {
     self.weatherAlert.textColor = axs_twindial_color(@"inkAlert");
     self.footer.textColor = ink;
     for (UIView *v in @[self.previous,self.toggle,self.next]) v.tintColor = ink;
-    BOOL demo = [axs_twindial_setting(@"demoLyrics", @NO) isEqual:@YES];
-    self.lyricTop.text = demo ? @"示例 · 把夜色交给海风" : @"暂无歌词";
+    self.demoLyrics = [axs_twindial_setting(@"demoLyrics", @NO) isEqual:@YES];
+    id local = axs_twindial_setting(@"localLRC", nil);
+    NSDictionary *lrc = [local isKindOfClass:NSDictionary.class] ? local : nil;
+    NSString *text = [lrc[@"text"] isKindOfClass:NSString.class] ? lrc[@"text"] : @"";
+    NSString *name = [lrc[@"name"] isKindOfClass:NSString.class] ? lrc[@"name"] : @"";
+    if (![self.lrcText isEqualToString:text] || ![self.lrcName isEqualToString:name]) {
+        self.lrcName = name; self.lrcText = text;
+        self.lrcRows = [self axs_twindial_parseLyrics:text];
+        self.lyricTop.text = self.demoLyrics ? @"示例 · 把夜色交给海风" : @"未导入匹配歌词";
+    }
+    if (self.running) [self axs_twindial_refreshMedia];
     if (!self.lyricBottom.text.length) self.lyricBottom.text = @"暂无曲目";
     self.toggle.backgroundColor = [ink colorWithAlphaComponent:.16];
     id image = axs_twindial_setting(@"artwork", nil);
@@ -205,12 +218,13 @@ static UILabel *axs_twindial_label(void) {
     self.player.hidden = self.weather.hidden = self.bridge.hidden = NO;
     CGFloat left = fmin(w*.40,160)*self.leftScale, right = fmin(w*.445,180)*self.rightScale;
     CGFloat gap = fmin(46, w*.115);
+    CGFloat safeTop = self.safeAreaInsets.top;
+    if (h-safeTop < 80) { self.player.hidden = self.weather.hidden = self.bridge.hidden = YES; return; }
     CGFloat fit = fmin(1, (w-56-gap)/(left+right));
-    fit = fmin(fit,(h-16)/fmax(left,right));
+    fit = fmin(fit,(h-safeTop-32)/fmax(left,right));
     left *= fit; right *= fit;
-    CGFloat x = 10 + (w-left-right-gap-20)*self.horizontal, lx = x+left/2, rx = x+left+gap+right/2;
-    CGFloat margin = fmax(left,right)/2 + 8;
-    CGFloat cy = margin + (h-2*margin)*((self.offset-.15)/.70);
+    CGFloat x = (w-left-right-gap)/2 + self.topX, lx = x+left/2, rx = x+left+gap+right/2;
+    CGFloat cy = safeTop + 16 + self.topY + fmax(left,right)/2;
     [self axs_twindial_disc:self.player art:self.playerArt size:left center:CGPointMake(lx,cy)];
     [self axs_twindial_disc:self.weather art:self.weatherArt size:right center:CGPointMake(rx,cy)];
     CGFloat a = lx+left/2-9, b = rx-right/2+9, d = b-a;
@@ -300,6 +314,59 @@ static UILabel *axs_twindial_label(void) {
 
 - (void)dealloc { [_timer invalidate]; }
 
+- (NSArray<NSArray *> *)axs_twindial_parseLyrics:(NSString *)text {
+    if (!text.length || text.length > 65536) return @[];
+    NSRegularExpression *tag = [NSRegularExpression regularExpressionWithPattern:@"\\[([0-9]{1,3}):([0-5][0-9])(?:[.:]([0-9]{1,3}))?\\]" options:0 error:NULL];
+    NSRegularExpression *offset = [NSRegularExpression regularExpressionWithPattern:@"^\\[offset:([+-]?[0-9]{1,6})\\]$" options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSMutableArray<NSArray *> *rows = [NSMutableArray array];
+    __block double correction = 0;
+    [text enumerateLinesUsingBlock:^(NSString *raw, BOOL *stop) {
+        NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if ([line hasPrefix:@"\uFEFF"]) line = [line substringFromIndex:1];
+        NSRange all = NSMakeRange(0,line.length);
+        NSTextCheckingResult *shift = [offset firstMatchInString:line options:0 range:all];
+        if (shift) { correction = [line substringWithRange:[shift rangeAtIndex:1]].doubleValue/1000.0; return; }
+        NSArray<NSTextCheckingResult *> *tags = [tag matchesInString:line options:0 range:all];
+        NSUInteger end = 0, count = 0;
+        for (NSTextCheckingResult *t in tags) {
+            if (t.range.location != end || count == 32) break;
+            end = NSMaxRange(t.range); count++;
+        }
+        if (!count) return;
+        NSString *content = [[line substringFromIndex:end] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (content.length > 256) content = [content substringToIndex:[content rangeOfComposedCharacterSequenceAtIndex:255].location];
+        for (NSUInteger i=0;i<count;i++) {
+            NSTextCheckingResult *t = tags[i];
+            double seconds = [line substringWithRange:[t rangeAtIndex:1]].doubleValue*60 + [line substringWithRange:[t rangeAtIndex:2]].doubleValue;
+            NSRange frac = [t rangeAtIndex:3];
+            if (frac.location != NSNotFound) seconds += [line substringWithRange:frac].doubleValue/pow(10,frac.length);
+            [rows addObject:@[@(seconds),content]];
+            if (rows.count == 1200) { *stop = YES; break; }
+        }
+    }];
+    [rows sortUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) { return [a[0] compare:b[0]]; }];
+    if (correction) for (NSUInteger i=0;i<rows.count;i++) rows[i] = @[@([rows[i][0] doubleValue]-correction), rows[i][1]];
+    return [rows copy];
+}
+
+- (void)axs_twindial_updateLyrics:(NSDictionary *)info title:(NSString *)title artist:(NSString *)artist {
+    NSString *fallback = self.demoLyrics ? @"示例 · 把夜色交给海风" : @"未导入匹配歌词";
+    NSString *name = [[NSString stringWithFormat:@"%@ - %@",artist,title] precomposedStringWithCanonicalMapping];
+    if (!artist.length || !title.length || ![name isEqualToString:self.lrcName.precomposedStringWithCanonicalMapping] || !self.lrcRows.count) { self.lyricTop.text = fallback; return; }
+    id progress = info[@"kMRMediaRemoteNowPlayingInfoElapsedTime"];
+    if (![progress isKindOfClass:NSNumber.class] || !isfinite([progress doubleValue]) || [progress doubleValue]<0) { self.lyricTop.text = @"播放器未提供进度"; return; }
+    double elapsed = [progress doubleValue];
+    id timestamp = info[@"kMRMediaRemoteNowPlayingInfoTimestamp"], rate = info[@"kMRMediaRemoteNowPlayingInfoPlaybackRate"];
+    if ([timestamp isKindOfClass:NSDate.class] && [rate isKindOfClass:NSNumber.class]) {
+        double extra = -[timestamp timeIntervalSinceNow], speed = [rate doubleValue];
+        if (isfinite(extra) && extra > 0 && extra < 86400 && isfinite(speed) && speed > 0 && speed <= 4) elapsed += extra*speed;
+    }
+    NSUInteger lo=0, hi=self.lrcRows.count;
+    while (lo<hi) { NSUInteger m=lo+(hi-lo)/2; if ([self.lrcRows[m][0] doubleValue]<=elapsed) lo=m+1; else hi=m; }
+    NSString *line = lo ? self.lrcRows[lo-1][1] : @"";
+    self.lyricTop.text = line.length ? line : @"♪";
+}
+
 - (void)axs_twindial_refreshMedia {
     if (!self.running) return;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -317,6 +384,7 @@ static UILabel *axs_twindial_label(void) {
         NSString *by = [artist isKindOfClass:NSString.class] ? artist : @"";
         view.lyricBottom.text = name.length ? (by.length ? [NSString stringWithFormat:@"%@ · %@",name,by] : name) : (by.length ? by : @"暂无曲目");
         view.lyricBottom.accessibilityLabel = view.lyricBottom.text;
+        [view axs_twindial_updateLyrics:info title:name artist:by];
         [view.toggle setImage:playing ? view.pauseImage : view.playImage forState:UIControlStateNormal];
         view.toggle.accessibilityLabel = playing ? @"暂停" : @"播放";
     });
@@ -412,7 +480,7 @@ static UILabel *axs_twindial_label(void) {
     } else {
         [manager stopUpdatingLocation];
         self.locationGeneration++; [self.geocoder cancelGeocode]; self.geocoder = nil; self.lastPlace = nil;
-        self.locationStatus = state == kCLAuthorizationStatusNotDetermined ? @"桌面定位未授权" : @"定位不可用";
+        self.locationStatus = state == kCLAuthorizationStatusNotDetermined ? @"桌面定位未获授权" : @"定位不可用";
         [self axs_twindial_setWeatherCity:@""];
         [self axs_twindial_updateWeather:nil];
     }

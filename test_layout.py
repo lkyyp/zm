@@ -8,20 +8,17 @@ keys = {x['key']:x for x in prefs['items'] if 'key' in x}
 assert keys['enabled']['default'] is False and keys['demoLyrics']['default'] is False
 axes = lambda k: [keys[k]['min'], keys[k]['default'], keys[k]['max']]
 count = 0
-for w,h,s,t,x,y in product((230,320,390,430,768),(180,390,540,850),axes('playerScale'),axes('weatherScale'),axes('horizontal'),axes('vertical')):
+for w,h,s,t,x,y in product((230,320,390,430,768),(180,390,540,850),axes('playerScale'),axes('weatherScale'),axes('topX'),axes('topY')):
     left,right = min(w*.40,160)*s, min(w*.445,180)*t
     gap = min(46,w*.115)
-    fit = min(1,(w-56-gap)/(left+right),(h-16)/max(left,right))
-    left,right = left*fit,right*fit
-    margin = max(left,right)/2+8
-    cy = margin+(h-2*margin)*((y-.15)/.70)
-    if h-2*margin > 1e-6 and y<.8499:
-        assert margin+(h-2*margin)*((y+.0001-.15)/.70)>cy
-    X = 10+(w-left-right-gap-20)*x
-    assert 9.99 <= X and X+left+gap+right <= w-9.99
-    assert 7.99 <= cy-max(left,right)/2 and cy+max(left,right)/2 <= h-7.99
-    assert left>0 and right>0 and gap>0
-    assert 10+(w-left-right-gap-20)>10
+    for safe in (0, 20, 54):
+        fit = min(1,(w-56-gap)/(left+right),(h-safe-32)/max(left,right))
+        l,r = left*fit,right*fit
+        cy = safe+16+y+max(l,r)/2
+        X = (w-l-r-gap)/2+x
+        assert 15.99 <= X and X+l+gap+r <= w-15.99
+        assert safe+3.99 <= cy-max(l,r)/2 and cy+max(l,r)/2 <= h-3.99
+        assert l>0 and r>0 and gap>0
     count += 1
 print(f'PASS {count} layout cases')
 assets = root/'layout/Library/Application Support/AxsTwinDialResources.bundle'

@@ -75,8 +75,8 @@
 }
 
 - (void)axs_twindial_updateLabel {
-    BOOL position = [[self.specifier propertyForKey:@"positionPrecision"] boolValue];
-    NSString *value = position ? [NSString stringWithFormat:@"%.2f%%", self.slider.value*100.0] : [NSString stringWithFormat:@"%.1f", self.slider.value];
+    BOOL point = [[self.specifier propertyForKey:@"pointPrecision"] boolValue];
+    NSString *value = point ? [NSString stringWithFormat:@"%+.2f pt", self.slider.value] : [NSString stringWithFormat:@"%.1f", self.slider.value];
     self.valueLabel.text = value;
     self.slider.accessibilityValue = value;
 }
